@@ -43,6 +43,9 @@ private:
   void ustawCzestotliwosc(uint32_t freq_hz);
   void ustawDuty(uint32_t duty);
 
+  // Pomocnicze: uruchom PWM na zadanej czestotliwosci (NIE ZMIENIA trybu/rampy)
+  void startPwmHz(uint32_t f_hz);
+
   // PCNT (pulse_cnt)
   void initPcnt();
   void pcntResetOdcinka();
@@ -50,6 +53,9 @@ private:
   void pcntStopOdcinka();
   void pcntUstawLimitOdcinka(uint32_t kroki_abs);
   uint32_t pcntPobierzLicznikAbs() const;      // ile krokow juz zrobione w odcinku (abs)
+
+  // Segmentacja dlugich odcinkow > limit PCNT
+  void startNastepnyKawal();
 
   static bool IRAM_ATTR pcnt_on_reach(
     pcnt_unit_handle_t unit,
@@ -83,8 +89,15 @@ private:
 
   int32_t poz_kroki = 0;
 
+  // ISR -> update()
   volatile bool flaga_odcinek_done = false;
   volatile uint32_t isr_odcinek_kroki = 0;
+
+  // Dlugie odcinki (segmentacja)
+  uint32_t odcinek_suma = 0;
+  uint32_t odcinek_pozostalo = 0;
+  uint32_t odcinek_zrobione = 0;
+  float odcinek_vmax = 0.0f;
 
   pcnt_unit_handle_t pcnt_unit = nullptr;
   pcnt_channel_handle_t pcnt_chan = nullptr;

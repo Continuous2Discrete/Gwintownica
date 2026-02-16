@@ -50,6 +50,21 @@ void OsRuchu::ustawDuty(uint32_t duty)
   ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
 }
 
+void OsRuchu::startPwmHz(uint32_t f_hz)
+{
+  if (f_hz < MIN_FREQ_STEP) f_hz = MIN_FREQ_STEP;
+  if (f_hz > MAX_FREQ_STEP) f_hz = MAX_FREQ_STEP;
+
+  uint8_t rozdz = dobierzRozdzielczosc(f_hz);
+  if (rozdz != rozdz_aktualna || freq_aktualna == 0)
+    konfigurujTimer(f_hz, rozdz);
+  else
+    ustawCzestotliwosc(f_hz);
+
+  ustawDuty(duty50(rozdz_aktualna));
+  czy_jedzie = true;
+}
+
 // ========================= Event queue =========================
 void OsRuchu::wrzucZdarzenie(TypZdarzenia t, uint32_t czas_ms, int32_t dane)
 {
@@ -85,14 +100,14 @@ bool IRAM_ATTR OsRuchu::pcnt_on_reach(
 
 void OsRuchu::onOdcinekDoneISR(uint32_t kroki_abs)
 {
-  // twardy stop (jak juz jedziemy bardzo wolno, to praktycznie bez szarpniecia)
+  // MUST FIX: w ISR robimy minimum
+  // Kompromis: zatrzymaj STEP natychmiast (zeby nie "dobieglo"),
+  // a reszte (pcnt stop/reset, eventy, stany) zrobimy w update().
   ledc_stop(LEDC_MODE, LEDC_CHANNEL, 0);
   czy_jedzie = false;
 
   isr_odcinek_kroki = kroki_abs;
   flaga_odcinek_done = true;
-
-  if (pcnt_unit) pcnt_unit_stop(pcnt_unit);
 }
 
 // ========================= PCNT init/control =========================
@@ -168,6 +183,36 @@ uint32_t OsRuchu::pcntPobierzLicznikAbs() const
   return (uint32_t)count;
 }
 
+// ========================= Segmentacja dlugich odcinkow =========================
+void OsRuchu::startNastepnyKawal()
+{
+  if (odcinek_pozostalo == 0)
+    return;
+
+  uint32_t kawal = odcinek_pozostalo;
+  if (kawal > PCNT_MAX_ODCINEK_KROKI) kawal = PCNT_MAX_ODCINEK_KROKI;
+
+  odcinek_pozostalo -= kawal;
+
+  flaga_odcinek_done = false;
+  isr_odcinek_kroki = 0;
+
+  pcntUstawLimitOdcinka(kawal);
+  pcntStartOdcinka();
+
+  // rampa dla tego kawalka
+  v_aktualna = 0.0f;
+  v_max = odcinek_vmax;
+  if (v_max < (float)MIN_FREQ_STEP) v_max = (float)MIN_FREQ_STEP;
+  if (v_max > (float)MAX_FREQ_STEP) v_max = (float)MAX_FREQ_STEP;
+
+  rampa_aktywna = true;
+  tryb_odcinka = true;
+
+  // MUST FIX: start bez kasowania trybu odcinka/rampy
+  startPwmHz(MIN_FREQ_STEP);
+}
+
 // ========================= Public =========================
 void OsRuchu::init()
 {
@@ -202,25 +247,50 @@ void OsRuchu::init()
 
 void OsRuchu::update(uint32_t teraz_ms)
 {
-  if (flaga_odcinek_done)
+  if (!flaga_odcinek_done) return;
+
+  // zabierz dane z ISR
+  flaga_odcinek_done = false;
+
+  // zatrzymaj PCNT "poza ISR" (bezpieczniej)
+  if (pcnt_unit) pcnt_unit_stop(pcnt_unit);
+
+  uint32_t kroki_abs = isr_odcinek_kroki;
+  if (kroki_abs == 0) kroki_abs = odcinek_limit;
+
+  // aktualizacja pozycji + statystyk segmentacji
+  int32_t delta = (int32_t)kroki_abs;
+  poz_kroki += kierunek_do_przodu ? delta : -delta;
+
+  if (tryb_odcinka)
+    odcinek_zrobione += kroki_abs;
+
+  pcntResetOdcinka();
+
+  // jesli byl to "kawal" dlugiego odcinka i cos zostalo -> startuj kolejny kawal
+  if (tryb_odcinka && odcinek_pozostalo > 0)
   {
-    flaga_odcinek_done = false;
-
-    uint32_t kroki_abs = isr_odcinek_kroki;
-    if (kroki_abs == 0) kroki_abs = odcinek_limit;
-
-    int32_t delta = (int32_t)kroki_abs;
-    poz_kroki += kierunek_do_przodu ? delta : -delta;
-
-    // segment zakonczony - wyzeruj rampy
-    rampa_aktywna = false;
-    v_aktualna = 0.0f;
-    v_max = 0.0f;
-
-    wrzucZdarzenie(TypZdarzenia::ODCINEK_DONE, teraz_ms, (int32_t)kroki_abs);
-
-    pcntResetOdcinka();
+    startNastepnyKawal();
+    return;
   }
+
+  // koniec calego odcinka
+  rampa_aktywna = false;
+  v_aktualna = 0.0f;
+  v_max = 0.0f;
+  tryb_odcinka = false;
+
+  // zwroc ODCINEK_DONE raz na caly ruch (nawet jesli byl segmentowany)
+  uint32_t done = odcinek_zrobione;
+  if (done == 0) done = kroki_abs;
+
+  // wyczysc segmentacje
+  odcinek_suma = 0;
+  odcinek_pozostalo = 0;
+  odcinek_zrobione = 0;
+  odcinek_vmax = 0.0f;
+
+  wrzucZdarzenie(TypZdarzenia::ODCINEK_DONE, teraz_ms, (int32_t)done);
 }
 
 void OsRuchu::tickRampa(uint32_t dt_ms)
@@ -229,43 +299,31 @@ void OsRuchu::tickRampa(uint32_t dt_ms)
   if (!tryb_odcinka) return;
   if (!rampa_aktywna) return;
 
-  // Pozostale kroki w odcinku
+  // Pozostale kroki w odcinku (w tym kawalku)
   uint32_t zrobione = pcntPobierzLicznikAbs();
-  if (zrobione >= odcinek_limit) return; // ISR i tak domknie
+  if (zrobione >= odcinek_limit) return;
 
   float pozostale = (float)(odcinek_limit - zrobione);
 
-  // Droga hamowania (w krokach) dla aktualnej predkosci:
   // s_stop = v^2 / (2a)
   float s_stop = (v_aktualna * v_aktualna) / (2.0f * a);
-
   float dt = (float)dt_ms / 1000.0f;
 
-  // Decyzja: przyspieszamy czy hamujemy
   if (pozostale <= s_stop)
   {
-    // hamowanie
     v_aktualna -= a * dt;
     if (v_aktualna < 0.0f) v_aktualna = 0.0f;
   }
   else
   {
-    // przyspieszanie do v_max
     v_aktualna += a * dt;
     if (v_aktualna > v_max) v_aktualna = v_max;
   }
 
-  // Przelicz na Hz
   uint32_t f = (uint32_t)(v_aktualna);
+  if (f < MIN_FREQ_STEP) f = MIN_FREQ_STEP;
+  if (f > MAX_FREQ_STEP) f = MAX_FREQ_STEP;
 
-  // Jesli bardzo nisko, nie ustawiaj ultra malych czestotliwosci
-  if (f < MIN_FREQ_STEP)
-    f = MIN_FREQ_STEP;
-
-  if (f > MAX_FREQ_STEP)
-    f = MAX_FREQ_STEP;
-
-  // Zmiana LEDC: czasem zmieniamy rozdzielczosc dla szerokiego zakresu
   uint8_t rozdz = dobierzRozdzielczosc(f);
   if (rozdz != rozdz_aktualna)
   {
@@ -286,7 +344,7 @@ void OsRuchu::ustawKierunek(bool do_przodu)
 
 void OsRuchu::startPredkosc(float v_kroki_s)
 {
-  // bez rampy - przydatne do homingu
+  // tryb prosty (homing) - bez rampy
   tryb_odcinka = false;
   rampa_aktywna = false;
 
@@ -297,17 +355,7 @@ void OsRuchu::startPredkosc(float v_kroki_s)
   }
 
   uint32_t f = (uint32_t)v_kroki_s;
-  if (f < MIN_FREQ_STEP) f = MIN_FREQ_STEP;
-  if (f > MAX_FREQ_STEP) f = MAX_FREQ_STEP;
-
-  uint8_t rozdz = dobierzRozdzielczosc(f);
-  if (rozdz != rozdz_aktualna || freq_aktualna == 0)
-    konfigurujTimer(f, rozdz);
-  else
-    ustawCzestotliwosc(f);
-
-  ustawDuty(duty50(rozdz_aktualna));
-  czy_jedzie = true;
+  startPwmHz(f);
 }
 
 void OsRuchu::startOdcinek(int32_t odcinek_kroki, float v_max_kroki_s)
@@ -324,23 +372,16 @@ void OsRuchu::startOdcinek(int32_t odcinek_kroki, float v_max_kroki_s)
 
   uint32_t kroki_abs = (uint32_t)abs(odcinek_kroki);
 
-  tryb_odcinka = true;
-  flaga_odcinek_done = false;
-  isr_odcinek_kroki = 0;
+  // przygotuj segmentacje (MUST FIX dla > 32767)
+  odcinek_suma = kroki_abs;
+  odcinek_pozostalo = kroki_abs;
+  odcinek_zrobione = 0;
+  odcinek_vmax = v_max_kroki_s;
 
-  pcntUstawLimitOdcinka(kroki_abs);
-  pcntStartOdcinka();
+  if (odcinek_vmax < (float)MIN_FREQ_STEP) odcinek_vmax = (float)MIN_FREQ_STEP;
+  if (odcinek_vmax > (float)MAX_FREQ_STEP) odcinek_vmax = (float)MAX_FREQ_STEP;
 
-  // przygotuj rampe
-  v_aktualna = 0.0f;
-  v_max = v_max_kroki_s;
-  if (v_max < (float)MIN_FREQ_STEP) v_max = (float)MIN_FREQ_STEP;
-  if (v_max > (float)MAX_FREQ_STEP) v_max = (float)MAX_FREQ_STEP;
-
-  rampa_aktywna = true;
-
-  // startujemy od minimalnej predkosci, a rampa w ticku podniesie
-  startPredkosc((float)MIN_FREQ_STEP);
+  startNastepnyKawal();
 }
 
 void OsRuchu::startDoPozycji(int32_t poz_docelowa_kroki, float v_max_kroki_s)
@@ -360,6 +401,14 @@ void OsRuchu::stopNatychmiast()
   rampa_aktywna = false;
   v_aktualna = 0.0f;
   v_max = 0.0f;
+
+  tryb_odcinka = false;
+
+  // czyszczenie segmentacji
+  odcinek_suma = 0;
+  odcinek_pozostalo = 0;
+  odcinek_zrobione = 0;
+  odcinek_vmax = 0.0f;
 
   pcntStopOdcinka();
 }

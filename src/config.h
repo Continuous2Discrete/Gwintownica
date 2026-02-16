@@ -74,6 +74,18 @@ static constexpr float V_SZYBKI    = 20000.0f;
 static constexpr float V_GWINT     = 6000.0f;
 static constexpr float V_POWROT    = 9000.0f;
 
+
+// ======================================================
+// BEZPIECZENSTWO / OGRANICZENIA
+// ======================================================
+
+// PCNT ma limit watchpoint ~ 32767, ustawiamy zapas (zeby nie dobic do granicy)
+static constexpr uint32_t PCNT_MAX_ODCINEK_KROKI = 30000;
+
+// Timeouty (ms) - MUST FIX (zabezpieczenie przed jazda w nieskonczonosc)
+static constexpr uint32_t TIMEOUT_BAZOWANIE_MS = 15000; // bazowanie do krancowki start (dostroisz)
+static constexpr uint32_t TIMEOUT_RUCH_MS      = 60000; // pojedynczy etap ruchu/odcinek (dostroisz)
+
 // ======================================================
 // DODATKOWE (opcjonalnie na przyszlosc)
 // ======================================================

@@ -17,7 +17,8 @@ enum class StanProcesu : uint8_t
   POWROT_PRZEZ_OTWOR,
   SZYBKI_DO_ZERO,
 
-  BLAD_KRANCOWKA_KONIEC
+  BLAD_KRANCOWKA_KONIEC,
+  BLAD_TIMEOUT
 };
 
 class SterownikProcesu
@@ -31,6 +32,8 @@ public:
 private:
   void przejdzDo(StanProcesu nowy, uint32_t teraz_ms);
   void obsluzZdarzenie(const Zdarzenie& z, uint32_t teraz_ms);
+
+  bool stanJestRuchem(StanProcesu s) const;
 
   Wejscia* wejscia = nullptr;
   OsRuchu* osruchu = nullptr;

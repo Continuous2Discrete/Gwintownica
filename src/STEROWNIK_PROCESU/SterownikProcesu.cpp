@@ -11,8 +11,43 @@ void SterownikProcesu::init(Wejscia* wej, OsRuchu* os)
   przejdzDo(StanProcesu::NIE_ZBAZOWANY_POSTOJ, millis());
 }
 
+bool SterownikProcesu::stanJestRuchem(StanProcesu s) const
+{
+  switch (s)
+  {
+    case StanProcesu::BAZOWANIE_DO_POCZATKU:
+    case StanProcesu::ODJAZD_OD_POCZATKU:
+    case StanProcesu::SZYBKI_DO_START_GWINTU:
+    case StanProcesu::GWINTOWANIE:
+    case StanProcesu::POWROT_PRZEZ_OTWOR:
+    case StanProcesu::SZYBKI_DO_ZERO:
+      return true;
+    default:
+      return false;
+  }
+}
+
 void SterownikProcesu::update(uint32_t teraz_ms)
 {
+  // MUST FIX: timeouty
+  uint32_t dt = teraz_ms - czas_wejscia_ms;
+
+  if (stan_biezacy == StanProcesu::BAZOWANIE_DO_POCZATKU && dt > TIMEOUT_BAZOWANIE_MS)
+  {
+    osruchu->stopNatychmiast();
+    przejdzDo(StanProcesu::BLAD_TIMEOUT, teraz_ms);
+    return;
+  }
+
+  if (stanJestRuchem(stan_biezacy) &&
+      stan_biezacy != StanProcesu::BAZOWANIE_DO_POCZATKU &&
+      dt > TIMEOUT_RUCH_MS)
+  {
+    osruchu->stopNatychmiast();
+    przejdzDo(StanProcesu::BLAD_TIMEOUT, teraz_ms);
+    return;
+  }
+
   Zdarzenie z;
 
   // 1) eventy z osi
@@ -20,6 +55,7 @@ void SterownikProcesu::update(uint32_t teraz_ms)
   {
     obsluzZdarzenie(z, teraz_ms);
     if (stan_biezacy == StanProcesu::BLAD_KRANCOWKA_KONIEC) return;
+    if (stan_biezacy == StanProcesu::BLAD_TIMEOUT) return;
   }
 
   // 2) eventy z wejsc
@@ -27,6 +63,7 @@ void SterownikProcesu::update(uint32_t teraz_ms)
   {
     obsluzZdarzenie(z, teraz_ms);
     if (stan_biezacy == StanProcesu::BLAD_KRANCOWKA_KONIEC) return;
+    if (stan_biezacy == StanProcesu::BLAD_TIMEOUT) return;
   }
 }
 
@@ -75,7 +112,6 @@ void SterownikProcesu::obsluzZdarzenie(const Zdarzenie& z, uint32_t teraz_ms)
     {
       if (z.typ == TypZdarzenia::KLIK)
       {
-        // Start cyklu
         przejdzDo(StanProcesu::SZYBKI_DO_START_GWINTU, teraz_ms);
         osruchu->startDoPozycji(POZ_START_GWINTU, V_SZYBKI);
       }
@@ -118,7 +154,9 @@ void SterownikProcesu::obsluzZdarzenie(const Zdarzenie& z, uint32_t teraz_ms)
     } break;
 
     case StanProcesu::BLAD_KRANCOWKA_KONIEC:
+    case StanProcesu::BLAD_TIMEOUT:
     {
+      // klik -> bazowanie od nowa
       if (z.typ == TypZdarzenia::KLIK)
       {
         osruchu->ustawKierunek(false);
@@ -143,5 +181,9 @@ void SterownikProcesu::przejdzDo(StanProcesu nowy, uint32_t teraz_ms)
   if (nowy == StanProcesu::BLAD_KRANCOWKA_KONIEC)
   {
     Serial.println("BLAD: KRANCOWKA_KONIEC. STOP. Klik = bazowanie.");
+  }
+  else if (nowy == StanProcesu::BLAD_TIMEOUT)
+  {
+    Serial.println("BLAD: TIMEOUT. STOP. Klik = bazowanie.");
   }
 }
