@@ -1,27 +1,30 @@
 #pragma once
 
-#include <stdint.h>
 #include <Arduino.h>
 #include "driver/ledc.h"
 #include "driver/pulse_cnt.h"
-#include "../zdarzenia.h"
 
-class OsRuchu
-{
+#include "../zdarzenia.h"
+#include "../Wifi_Mqtt_OTA/Parametry.h"  // <- Parametry z komponentu (dostosuj ścieżkę)
+
+class OsRuchu {
 public:
   void init();
-  void update(uint32_t teraz_ms);              // obrabia flagi ISR + eventy
-  void tickRampa(uint32_t dt_ms);             // wywolywac co 1 ms (scheduler w main)
+  void update(uint32_t teraz_ms);     // obrabia flagi ISR + eventy
+  void tickRampa(uint32_t dt_ms);     // wywoływać co 1 ms
+
+  // NOWE: zastosuj aktualne parametry (cache lokalny)
+  void applyParametry(const Parametry& p);
 
   void ustawKierunek(bool do_przodu);
 
-  // Prosty tryb: stale Hz (uzyteczne np. do bazowania)
+  // tryb prosty (homing)
   void startPredkosc(float v_kroki_s);
 
-  // Ruch na odcinek z rampa (start/stop 0)
+  // ruch odcinkiem z rampą (start/stop 0)
   void startOdcinek(int32_t odcinek_kroki, float v_max_kroki_s);
 
-  // Ruch do pozycji absolutnej (w krokach), z rampa
+  // ruch do pozycji absolutnej (w krokach), z rampą
   void startDoPozycji(int32_t poz_docelowa_kroki, float v_max_kroki_s);
 
   void stopNatychmiast();
@@ -31,7 +34,6 @@ public:
   bool jedzie() const { return czy_jedzie; }
   bool aktualnyKierunek() const { return kierunek_do_przodu; }
   float aktualnaPredkosc() const { return v_aktualna; }
-
   int32_t pozycjaKroki() const { return poz_kroki; }
   void ustawPozycjeKroki(int32_t p) { poz_kroki = p; }
 
@@ -42,19 +44,15 @@ private:
   void konfigurujTimer(uint32_t freq_hz, uint8_t rozdz_bits);
   void ustawCzestotliwosc(uint32_t freq_hz);
   void ustawDuty(uint32_t duty);
-
-  // Pomocnicze: uruchom PWM na zadanej czestotliwosci (NIE ZMIENIA trybu/rampy)
   void startPwmHz(uint32_t f_hz);
 
-  // PCNT (pulse_cnt)
+  // PCNT
   void initPcnt();
   void pcntResetOdcinka();
   void pcntStartOdcinka();
   void pcntStopOdcinka();
   void pcntUstawLimitOdcinka(uint32_t kroki_abs);
-  uint32_t pcntPobierzLicznikAbs() const;      // ile krokow juz zrobione w odcinku (abs)
-
-  // Segmentacja dlugich odcinkow > limit PCNT
+  uint32_t pcntPobierzLicznikAbs() const;
   void startNastepnyKawal();
 
   static bool IRAM_ATTR pcnt_on_reach(
@@ -74,7 +72,6 @@ private:
   // Runtime
   bool czy_jedzie = false;
   bool kierunek_do_przodu = true;
-
   uint32_t freq_aktualna = 0;
   uint8_t rozdz_aktualna = 0;
 
@@ -82,9 +79,9 @@ private:
   bool tryb_odcinka = false;
   uint32_t odcinek_limit = 0;
 
-  float v_aktualna = 0.0f;                    // kroki/s
-  float v_max = 0.0f;                         // kroki/s
-  float a = 0.0f;                             // kroki/s^2
+  float v_aktualna = 0.0f;  // kroki/s
+  float v_max = 0.0f;       // kroki/s
+  float a = 25000.0f;       // kroki/s^2  <- będzie nadpisywane z Parametry
   bool rampa_aktywna = false;
 
   int32_t poz_kroki = 0;
@@ -93,7 +90,7 @@ private:
   volatile bool flaga_odcinek_done = false;
   volatile uint32_t isr_odcinek_kroki = 0;
 
-  // Dlugie odcinki (segmentacja)
+  // Długie odcinki (segmentacja)
   uint32_t odcinek_suma = 0;
   uint32_t odcinek_pozostalo = 0;
   uint32_t odcinek_zrobione = 0;

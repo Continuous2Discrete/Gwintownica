@@ -4,20 +4,23 @@
 #include "WEJSCIA/Wejscia.h"
 #include "OS_RUCHU/OsRuchu.h"
 #include "STEROWNIK_PROCESU/SterownikProcesu.h"
+#include "Wifi_Mqtt_OTA/Agent.h"
 
+Agent agent;
 Wejscia wej;
 OsRuchu os;
-SterownikProcesu fsm;
+SterownikProcesu sterownikProcesu;
 
 void setup()
 {
   Serial.begin(115200);
   delay(200);
   Serial.println("Start Gwintownica");
+  agent.begin();
 
   wej.init();
   os.init();
-  fsm.init(&wej, &os);
+  sterownikProcesu.init(&wej, &os, &agent.parametry());
 
   Serial.println("Gotowe: klik -> bazowanie do krancowki POCZATEK");
 }
@@ -40,6 +43,7 @@ void loop()
 
   // 3) IO + FSM
   wej.update(teraz);
-  fsm.update(teraz);
+  sterownikProcesu.update(teraz);
+  agent.loop();
 }
 

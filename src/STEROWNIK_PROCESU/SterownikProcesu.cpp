@@ -1,20 +1,20 @@
 #include "SterownikProcesu.h"
-#include "../config.h"
+
+#include "../config.h"                // TIMEOUT, POZ_ZERO, itd.
 #include "../WEJSCIA/Wejscia.h"
 #include "../OS_RUCHU/OsRuchu.h"
-#include <Arduino.h>
+#include "../Wifi_Mqtt_OTA/Parametry.h"  // <- Parametry z komponentu (dostosuj ścieżkę)
 
-void SterownikProcesu::init(Wejscia* wej, OsRuchu* os)
-{
+void SterownikProcesu::init(Wejscia* wej, OsRuchu* os, Parametry* param) {
   wejscia = wej;
   osruchu = os;
+  p = param;
+
   przejdzDo(StanProcesu::NIE_ZBAZOWANY_POSTOJ, millis());
 }
 
-bool SterownikProcesu::stanJestRuchem(StanProcesu s) const
-{
-  switch (s)
-  {
+bool SterownikProcesu::stanJestRuchem(StanProcesu s) const {
+  switch (s) {
     case StanProcesu::BAZOWANIE_DO_POCZATKU:
     case StanProcesu::ODJAZD_OD_POCZATKU:
     case StanProcesu::SZYBKI_DO_START_GWINTU:
@@ -27,13 +27,10 @@ bool SterownikProcesu::stanJestRuchem(StanProcesu s) const
   }
 }
 
-void SterownikProcesu::update(uint32_t teraz_ms)
-{
-  // MUST FIX: timeouty
+void SterownikProcesu::update(uint32_t teraz_ms) {
   uint32_t dt = teraz_ms - czas_wejscia_ms;
 
-  if (stan_biezacy == StanProcesu::BAZOWANIE_DO_POCZATKU && dt > TIMEOUT_BAZOWANIE_MS)
-  {
+  if (stan_biezacy == StanProcesu::BAZOWANIE_DO_POCZATKU && dt > TIMEOUT_BAZOWANIE_MS) {
     osruchu->stopNatychmiast();
     przejdzDo(StanProcesu::BLAD_TIMEOUT, teraz_ms);
     return;
@@ -41,8 +38,7 @@ void SterownikProcesu::update(uint32_t teraz_ms)
 
   if (stanJestRuchem(stan_biezacy) &&
       stan_biezacy != StanProcesu::BAZOWANIE_DO_POCZATKU &&
-      dt > TIMEOUT_RUCH_MS)
-  {
+      dt > TIMEOUT_RUCH_MS) {
     osruchu->stopNatychmiast();
     przejdzDo(StanProcesu::BLAD_TIMEOUT, teraz_ms);
     return;
@@ -50,117 +46,101 @@ void SterownikProcesu::update(uint32_t teraz_ms)
 
   Zdarzenie z;
 
-  // 1) eventy z osi
-  while (osruchu->pobierzZdarzenie(z))
-  {
+  while (osruchu->pobierzZdarzenie(z)) {
     obsluzZdarzenie(z, teraz_ms);
     if (stan_biezacy == StanProcesu::BLAD_KRANCOWKA_KONIEC) return;
     if (stan_biezacy == StanProcesu::BLAD_TIMEOUT) return;
   }
 
-  // 2) eventy z wejsc
-  while (wejscia->pobierzZdarzenie(z))
-  {
+  while (wejscia->pobierzZdarzenie(z)) {
     obsluzZdarzenie(z, teraz_ms);
     if (stan_biezacy == StanProcesu::BLAD_KRANCOWKA_KONIEC) return;
     if (stan_biezacy == StanProcesu::BLAD_TIMEOUT) return;
   }
 }
 
-void SterownikProcesu::obsluzZdarzenie(const Zdarzenie& z, uint32_t teraz_ms)
-{
-  // bezpieczenstwo: krancowka koniec zawsze wygrywa
-  if (z.typ == TypZdarzenia::KONIEC_HIT)
-  {
+void SterownikProcesu::obsluzZdarzenie(const Zdarzenie& z, uint32_t teraz_ms) {
+  // bezpieczeństwo: krańcówka koniec zawsze wygrywa
+  if (z.typ == TypZdarzenia::KONIEC_HIT) {
     osruchu->stopNatychmiast();
     przejdzDo(StanProcesu::BLAD_KRANCOWKA_KONIEC, teraz_ms);
     return;
   }
 
-  switch (stan_biezacy)
-  {
-    case StanProcesu::NIE_ZBAZOWANY_POSTOJ:
-    {
-      if (z.typ == TypZdarzenia::KLIK)
-      {
+  switch (stan_biezacy) {
+    case StanProcesu::NIE_ZBAZOWANY_POSTOJ: {
+      if (z.typ == TypZdarzenia::KLIK) {
+        // zastosuj aktualne parametry (cache osi)
+        osruchu->applyParametry(*p);
+
         osruchu->ustawKierunek(false);
-        osruchu->startPredkosc(V_BAZOWANIE);
+        osruchu->startPredkosc(p->v_bazowanie);
         przejdzDo(StanProcesu::BAZOWANIE_DO_POCZATKU, teraz_ms);
       }
     } break;
 
-    case StanProcesu::BAZOWANIE_DO_POCZATKU:
-    {
-      if (z.typ == TypZdarzenia::POCZATEK_HIT)
-      {
+    case StanProcesu::BAZOWANIE_DO_POCZATKU: {
+      if (z.typ == TypZdarzenia::POCZATEK_HIT) {
         osruchu->stopNatychmiast();
         przejdzDo(StanProcesu::ODJAZD_OD_POCZATKU, teraz_ms);
-        osruchu->startOdcinek((int32_t)ODJAZD_OD_KRANCOWKI_KROKI, V_BAZOWANIE);
+
+        osruchu->startOdcinek((int32_t)p->odjazd_od_kranc_kroki, p->v_bazowanie);
       }
     } break;
 
-    case StanProcesu::ODJAZD_OD_POCZATKU:
-    {
-      if (z.typ == TypZdarzenia::ODCINEK_DONE)
-      {
+    case StanProcesu::ODJAZD_OD_POCZATKU: {
+      if (z.typ == TypZdarzenia::ODCINEK_DONE) {
         osruchu->ustawPozycjeKroki(0);
         przejdzDo(StanProcesu::GOTOWY_POSTOJ, teraz_ms);
       }
     } break;
 
-    case StanProcesu::GOTOWY_POSTOJ:
-    {
-      if (z.typ == TypZdarzenia::KLIK)
-      {
+    case StanProcesu::GOTOWY_POSTOJ: {
+      if (z.typ == TypZdarzenia::KLIK) {
+        // zastosuj parametry jeszcze raz “na start cyklu”
+        osruchu->applyParametry(*p);
+
         przejdzDo(StanProcesu::SZYBKI_DO_START_GWINTU, teraz_ms);
-        osruchu->startDoPozycji(POZ_START_GWINTU, V_SZYBKI);
+        osruchu->startDoPozycji(p->poz_start_gwintu, p->v_szybki);
       }
     } break;
 
-    case StanProcesu::SZYBKI_DO_START_GWINTU:
-    {
-      if (z.typ == TypZdarzenia::ODCINEK_DONE)
-      {
+    case StanProcesu::SZYBKI_DO_START_GWINTU: {
+      if (z.typ == TypZdarzenia::ODCINEK_DONE) {
         przejdzDo(StanProcesu::GWINTOWANIE, teraz_ms);
-        osruchu->startOdcinek(DLUGOSC_GWINTU, V_GWINT);
+        osruchu->startOdcinek(p->dlugosc_gwintu, p->v_gwint);
       }
     } break;
 
-    case StanProcesu::GWINTOWANIE:
-    {
-      if (z.typ == TypZdarzenia::ODCINEK_DONE)
-      {
+    case StanProcesu::GWINTOWANIE: {
+      if (z.typ == TypZdarzenia::ODCINEK_DONE) {
         przejdzDo(StanProcesu::POWROT_PRZEZ_OTWOR, teraz_ms);
-        int32_t powrot = -(DLUGOSC_GWINTU + ZAPAS_WYJAZDU);
-        osruchu->startOdcinek(powrot, V_POWROT);
+        int32_t powrot = -(p->dlugosc_gwintu + p->zapas_wyjazdu);
+        osruchu->startOdcinek(powrot, p->v_powrot);
       }
     } break;
 
-    case StanProcesu::POWROT_PRZEZ_OTWOR:
-    {
-      if (z.typ == TypZdarzenia::ODCINEK_DONE)
-      {
+    case StanProcesu::POWROT_PRZEZ_OTWOR: {
+      if (z.typ == TypZdarzenia::ODCINEK_DONE) {
         przejdzDo(StanProcesu::SZYBKI_DO_ZERO, teraz_ms);
-        osruchu->startDoPozycji(POZ_ZERO, V_SZYBKI);
+        osruchu->startDoPozycji(POZ_ZERO, p->v_szybki);
       }
     } break;
 
-    case StanProcesu::SZYBKI_DO_ZERO:
-    {
-      if (z.typ == TypZdarzenia::ODCINEK_DONE)
-      {
+    case StanProcesu::SZYBKI_DO_ZERO: {
+      if (z.typ == TypZdarzenia::ODCINEK_DONE) {
         przejdzDo(StanProcesu::GOTOWY_POSTOJ, teraz_ms);
       }
     } break;
 
     case StanProcesu::BLAD_KRANCOWKA_KONIEC:
-    case StanProcesu::BLAD_TIMEOUT:
-    {
-      // klik -> bazowanie od nowa
-      if (z.typ == TypZdarzenia::KLIK)
-      {
+    case StanProcesu::BLAD_TIMEOUT: {
+      if (z.typ == TypZdarzenia::KLIK) {
+        // restart bazowania
+        osruchu->applyParametry(*p);
+
         osruchu->ustawKierunek(false);
-        osruchu->startPredkosc(V_BAZOWANIE);
+        osruchu->startPredkosc(p->v_bazowanie);
         przejdzDo(StanProcesu::BAZOWANIE_DO_POCZATKU, teraz_ms);
       }
     } break;
@@ -170,20 +150,16 @@ void SterownikProcesu::obsluzZdarzenie(const Zdarzenie& z, uint32_t teraz_ms)
   }
 }
 
-void SterownikProcesu::przejdzDo(StanProcesu nowy, uint32_t teraz_ms)
-{
+void SterownikProcesu::przejdzDo(StanProcesu nowy, uint32_t teraz_ms) {
   stan_biezacy = nowy;
   czas_wejscia_ms = teraz_ms;
 
   Serial.print("FSM stan -> ");
   Serial.println((int)stan_biezacy);
 
-  if (nowy == StanProcesu::BLAD_KRANCOWKA_KONIEC)
-  {
+  if (nowy == StanProcesu::BLAD_KRANCOWKA_KONIEC) {
     Serial.println("BLAD: KRANCOWKA_KONIEC. STOP. Klik = bazowanie.");
-  }
-  else if (nowy == StanProcesu::BLAD_TIMEOUT)
-  {
+  } else if (nowy == StanProcesu::BLAD_TIMEOUT) {
     Serial.println("BLAD: TIMEOUT. STOP. Klik = bazowanie.");
   }
 }
