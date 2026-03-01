@@ -49,6 +49,11 @@ private:
   unsigned long _lastWifiAttempt = 0;
   unsigned long _lastMqttAttempt = 0;
 
+  bool _wifiWasConnected = false;
+  bool _otaEnabled = false;
+
+  void _onWifiJustConnected();
+
   void _ensureWifi();
   void _ensureMqtt();
 

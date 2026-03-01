@@ -63,6 +63,7 @@ void Agent::_onMqttConnected(void* ctx) {
 void Agent::_publishSnapshot() {
   // Publikujemy tylko te z publishOnConnect
   // Bez retained, zgodnie z Twoim wymaganiem.
+  _net.publish(Topic::MQTT_TOPIC_OTA, "OFF");
   char buf[48];
 
   for (size_t i = 0; i < _defsCount; i++) {

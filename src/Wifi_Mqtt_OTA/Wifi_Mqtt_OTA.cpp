@@ -10,6 +10,11 @@ NetMqttOta* NetMqttOta::_instance = nullptr;
   #define NETLOGLN(x)
 #endif
 
+static bool payloadEquals(const uint8_t* p, size_t len, const char* s) {
+  const size_t sl = strlen(s);
+  return (len == sl) && memcmp(p, s, len) == 0;
+}
+
 NetMqttOta::NetMqttOta() : _mqtt(_wifi) {
   _instance = this;
 }
@@ -22,6 +27,11 @@ void NetMqttOta::setOnMqttConnected(ConnectedHandler handler, void* ctx) {
 void NetMqttOta::begin() {
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
+
+  // Hostname z AgentConfig.h (WIFI_HOSTNAME). Jeśli pusty string => nie ustawiamy.
+  if (WIFI_HOSTNAME[0] != '\0') {
+    WiFi.setHostname(WIFI_HOSTNAME);
+  }
 
   _mqtt.setServer(MQTT_SERVER, (uint16_t)MQTT_PORT);
   _mqtt.setCallback(NetMqttOta::_mqttCallbackTrampoline);
@@ -37,9 +47,10 @@ void NetMqttOta::loop() {
     _mqtt.loop();
   }
 
-  // OTA zawsze dostępne, ale handler działa tylko gdy OTA jest aktywowane komendą
-  // U Ciebie OTA jest "wymagane", ale aktywacja może być po topicu MQTT_TOPIC_OTA
-  ArduinoOTA.handle();
+  // OTA domyślnie OFF: handle tylko gdy zostało włączone przez MQTT
+  if (_otaEnabled) {
+    ArduinoOTA.handle();
+  }
 }
 
 bool NetMqttOta::wifiConnected() const {
@@ -73,15 +84,38 @@ bool NetMqttOta::subscribe(const char* topic, MsgHandler handler, void* ctx) {
   return true;
 }
 
+void NetMqttOta::_onWifiJustConnected() {
+  // Log: IP + hostname + MAC (raz na połączenie)
+  const IPAddress ip = WiFi.localIP();
+  const char* host = WiFi.getHostname();
+  const String mac = WiFi.macAddress();
+
+  NETLOGF("[WiFi] Connected. IP=%s Host=%s MAC=%s\n",
+          ip.toString().c_str(),
+          host ? host : "",
+          mac.c_str());
+}
+
 void NetMqttOta::_ensureWifi() {
-  if (wifiConnected()) return;
+  const bool nowConnected = wifiConnected();
 
-  const unsigned long now = millis();
-  if (now - _lastWifiAttempt < EDGE_WIFI_RETRY_MS) return;
-  _lastWifiAttempt = now;
+  // wykrycie przejścia: disconnected -> connected
+  if (nowConnected && !_wifiWasConnected) {
+    _wifiWasConnected = true;
+    _onWifiJustConnected();
+    return;
+  }
 
-  NETLOGF("[WiFi] Connecting to %s\n", WIFI_SSID);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  if (!nowConnected) {
+    _wifiWasConnected = false;
+
+    const unsigned long now = millis();
+    if (now - _lastWifiAttempt < EDGE_WIFI_RETRY_MS) return;
+    _lastWifiAttempt = now;
+
+    NETLOGF("[WiFi] Connecting to %s\n", WIFI_SSID);
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+  }
 }
 
 void NetMqttOta::_ensureMqtt() {
@@ -99,7 +133,7 @@ void NetMqttOta::_ensureMqtt() {
   if (ok) {
     NETLOGLN("OK");
 
-    // OTA setup raz
+    // OTA callbacks raz (ale bez ArduinoOTA.begin(); bo OTA ma być OFF domyślnie)
     if (!_otaConfigured) _setupOtaOnce();
 
     // 1) Najpierw snapshot parametrów i innych rzeczy z warstwy wyższej
@@ -128,12 +162,11 @@ void NetMqttOta::_setupOtaOnce() {
     NETLOGF("[OTA] Error %u\n", (unsigned)e);
   });
 
-  ArduinoOTA.begin();
-  NETLOGLN("[OTA] Ready");
+  // UWAGA: bez ArduinoOTA.begin() tutaj (OTA ma startować dopiero po MQTT "ON")
 }
 
 void NetMqttOta::_resubscribeAll() {
-  // OTA topic always subscribed (required)
+  // OTA topic zawsze subskrybowany (wymagane do aktywacji OTA przez MQTT)
   _mqtt.subscribe(Topic::MQTT_TOPIC_OTA);
 
   for (size_t i = 0; i < _subCount; i++) {
@@ -147,24 +180,40 @@ void NetMqttOta::_mqttCallbackTrampoline(char* topic, uint8_t* payload, unsigned
   if (_instance) _instance->_mqttCallback(topic, payload, length);
 }
 
-static bool payloadEquals(const uint8_t* p, size_t len, const char* s) {
-  const size_t sl = strlen(s);
-  return (len == sl) && memcmp(p, s, len) == 0;
-}
-
 void NetMqttOta::_mqttCallback(char* topic, uint8_t* payload, unsigned int length) {
   if (!topic) return;
 
-  // OTA control: MQTT_TOPIC_OTA required
+  // OTA control: Topic::MQTT_TOPIC_OTA required
   if (strcmp(topic, Topic::MQTT_TOPIC_OTA) == 0) {
+
     if (payloadEquals(payload, length, "ON")) {
-      NETLOGLN("[OTA] Enabled by MQTT");
-      // ArduinoOTA.handle i tak leci w loop(), a begin jest zawsze.
+      if (!_otaConfigured) _setupOtaOnce();
+
+      if (!_otaEnabled) {
+        if (WIFI_HOSTNAME[0] != '\0') {
+          ArduinoOTA.setHostname(WIFI_HOSTNAME);
+        }
+        ArduinoOTA.begin();
+        _otaEnabled = true;
+        NETLOGLN("[OTA] Enabled by MQTT");
+      }
+
+    } else if (payloadEquals(payload, length, "OFF")) {
+
+      // "OFF" = przestajemy obsługiwać OTA w loop()
+      _otaEnabled = false;
+
+      // Jeśli używasz ESP32 i chcesz twardo zatrzymać OTA serwer:
+      #if defined(ARDUINO_ARCH_ESP32)
+        ArduinoOTA.end();
+      #endif
+
+      NETLOGLN("[OTA] Disabled by MQTT");
+
     } else {
-      NETLOGLN("[OTA] Disabled by MQTT (noop)");
-      // W tej wersji "disable" nie wyłącza ArduinoOTA, bo to komplikacja.
-      // Twoje założenie: minimalnie, działa, bez fantazji.
+      NETLOGLN("[OTA] Unknown command (use ON/OFF)");
     }
+
     return;
   }
 
