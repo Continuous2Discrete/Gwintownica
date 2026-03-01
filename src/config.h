@@ -42,6 +42,7 @@ static constexpr uint32_t MAX_FREQ_STEP = 100000;  // 100 kHz ~ max rpm wg Twoje
 // WEJSCIA - debounce
 // ======================================================
 static constexpr uint32_t DEBOUNCE_BTN_MS = 40;
+static constexpr uint32_t DEBOUNCE_KR_MS = 20;
 
 // ======================================================
 // RUCH - RAMPA
@@ -83,7 +84,7 @@ static constexpr float V_POWROT    = 9000.0f;
 static constexpr uint32_t PCNT_MAX_ODCINEK_KROKI = 30000;
 
 // Timeouty (ms) - MUST FIX (zabezpieczenie przed jazda w nieskonczonosc)
-static constexpr uint32_t TIMEOUT_BAZOWANIE_MS = 15000; // bazowanie do krancowki start (dostroisz)
+static constexpr uint32_t TIMEOUT_BAZOWANIE_MS = 30000; // bazowanie do krancowki start (dostroisz)
 static constexpr uint32_t TIMEOUT_RUCH_MS      = 60000; // pojedynczy etap ruchu/odcinek (dostroisz)
 
 // ======================================================

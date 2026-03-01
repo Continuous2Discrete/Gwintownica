@@ -29,6 +29,10 @@ public:
 
   void stopNatychmiast();
 
+  // Pozycja absolutna "na żywo" (uwzględnia postęp aktualnego odcinka/segmentu)
+  // Przydaje się m.in. do "toggle" w trakcie ruchu.
+  int32_t pozycjaKrokiLive() const;
+
   bool pobierzZdarzenie(Zdarzenie& out);
 
   bool jedzie() const { return czy_jedzie; }

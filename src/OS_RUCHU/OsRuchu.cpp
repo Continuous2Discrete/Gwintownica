@@ -64,6 +64,25 @@ void OsRuchu::wrzucZdarzenie(TypZdarzenia t, uint32_t czas_ms, int32_t dane) {
   q_head = next;
 }
 
+int32_t OsRuchu::pozycjaKrokiLive() const
+{
+  // Jeśli nie jedziemy lub nie jesteśmy w trybie odcinka,
+  // to "live" == znana pozycja bazowa.
+  if (!czy_jedzie || !tryb_odcinka) {
+      return poz_kroki;
+  }
+  // PCNT liczy kroki w aktualnym segmencie odcinka (abs)
+  const uint32_t seg = pcntPobierzLicznikAbs();
+
+  // Jeśli odcinek był segmentowany, to odcinek_zrobione zawiera sumę pełnych segmentów.
+  const uint32_t done = odcinek_zrobione;
+
+  const int32_t delta = static_cast<int32_t>(done + seg);
+
+  // Poz absolutna = pozycja startowa +/− delta w zależności od kierunku
+  return kierunek_do_przodu ? (poz_kroki + delta) : (poz_kroki - delta);
+}
+
 bool OsRuchu::pobierzZdarzenie(Zdarzenie& out) {
   if (q_tail == q_head) return false;
   out = q[q_tail];
@@ -174,16 +193,24 @@ void OsRuchu::startNastepnyKawal() {
   pcntUstawLimitOdcinka(kawal);
   pcntStartOdcinka();
 
-  v_aktualna = 0.0f;
   v_max = odcinek_vmax;
-
   if (v_max < (float)MIN_FREQ_STEP) v_max = (float)MIN_FREQ_STEP;
   if (v_max > (float)MAX_FREQ_STEP) v_max = (float)MAX_FREQ_STEP;
 
   rampa_aktywna = true;
   tryb_odcinka = true;
 
-  startPwmHz(MIN_FREQ_STEP);
+  // Pierwszy segment: klasyczny start od MIN i narastanie.
+  // Kolejne segmenty: kontynuacja profilu predkosci bez restartu rampy od zera.
+  if (odcinek_zrobione == 0) {
+    v_aktualna = 0.0f;
+    startPwmHz(MIN_FREQ_STEP);
+  } else {
+    uint32_t f_resume = (uint32_t)v_aktualna;
+    if (f_resume < MIN_FREQ_STEP) f_resume = MIN_FREQ_STEP;
+    if (f_resume > MAX_FREQ_STEP) f_resume = MAX_FREQ_STEP;
+    startPwmHz(f_resume);
+  }
 }
 
 // ========================= NOWE: Parametry =========================
@@ -262,11 +289,15 @@ void OsRuchu::tickRampa(uint32_t dt_ms) {
   if (!czy_jedzie) return;
   if (!tryb_odcinka) return;
   if (!rampa_aktywna) return;
+  if (a <= 0.0f) return;
+  if (odcinek_suma == 0) return;
 
-  uint32_t zrobione = pcntPobierzLicznikAbs();
-  if (zrobione >= odcinek_limit) return;
+  uint32_t zrobione_seg = pcntPobierzLicznikAbs();
+  uint32_t zrobione_total = odcinek_zrobione + zrobione_seg;
+  if (zrobione_total >= odcinek_suma) return;
 
-  float pozostale = (float)(odcinek_limit - zrobione);
+  // Kluczowe: decyzja accel/decel liczona dla calego odcinka, nie dla pojedynczego segmentu PCNT.
+  float pozostale = (float)(odcinek_suma - zrobione_total);
   float s_stop = (v_aktualna * v_aktualna) / (2.0f * a);
 
   float dt = (float)dt_ms / 1000.0f;
@@ -293,7 +324,7 @@ void OsRuchu::tickRampa(uint32_t dt_ms) {
 
 void OsRuchu::ustawKierunek(bool do_przodu) {
   kierunek_do_przodu = do_przodu;
-  digitalWrite(PIN_DIR, do_przodu ? HIGH : LOW);
+  digitalWrite(PIN_DIR, do_przodu ? LOW : HIGH);
 }
 
 void OsRuchu::startPredkosc(float v_kroki_s) {

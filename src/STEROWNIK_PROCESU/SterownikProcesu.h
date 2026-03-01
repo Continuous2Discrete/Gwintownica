@@ -9,6 +9,7 @@ struct Parametry;
 
 enum class StanProcesu : uint8_t {
   NIE_ZBAZOWANY_POSTOJ = 0,
+  UWALNIANIE_KRANCOWKI_POCZATKU,
   BAZOWANIE_DO_POCZATKU,
   ODJAZD_OD_POCZATKU,
   GOTOWY_POSTOJ,
@@ -16,6 +17,7 @@ enum class StanProcesu : uint8_t {
   GWINTOWANIE,
   POWROT_PRZEZ_OTWOR,
   SZYBKI_DO_ZERO,
+  BLAD_KRANCOWKA_POCZATEK,
   BLAD_KRANCOWKA_KONIEC,
   BLAD_TIMEOUT
 };
@@ -31,6 +33,8 @@ private:
   void przejdzDo(StanProcesu nowy, uint32_t teraz_ms);
   void obsluzZdarzenie(const Zdarzenie& z, uint32_t teraz_ms);
   bool stanJestRuchem(StanProcesu s) const;
+  bool stanDopuszczaKraPocz(StanProcesu s) const;
+  void startBezpieczneBazowanie(uint32_t teraz_ms);
 
   Wejscia* wejscia = nullptr;
   OsRuchu* osruchu = nullptr;
