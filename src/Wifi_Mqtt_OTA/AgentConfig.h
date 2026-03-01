@@ -6,15 +6,15 @@
 // X nazwa, typ, default, subscribable, publish_on_connect, topic
 // ==========================
 #define EDGE_PARAMETRY_LIST(X) \
-  X(przyspieszenie_a,      int, 25000, true, true, Topic::PRZYSPIESZENIE_A) \
+  X(przyspieszenie_a,      int, 20000, true, true, Topic::PRZYSPIESZENIE_A) \
   X(v_bazowanie,           int, 3000,  true, true, Topic::V_BAZOWANIE) \
-  X(v_szybki,              int, 20000, true, true, Topic::V_SZYBKI) \
-  X(v_gwint,               int, 6000,  true, true, Topic::V_GWINT) \
-  X(v_powrot,              int, 9000,  true, true, Topic::V_POWROT) \
-  X(odjazd_od_kranc_kroki, int,   200,      true, true, Topic::ODJAZD_KROKI) \
-  X(poz_start_gwintu,      int,   5000,     true, true, Topic::POZ_START_GWINTU) \
-  X(dlugosc_gwintu,        int,   3000,     true, true, Topic::DLUGOSC_GWINTU) \
-  X(zapas_wyjazdu,         int,   300,      true, true, Topic::ZAPAS_WYJAZDU)
+  X(v_szybki,              int, 35000, true, true, Topic::V_SZYBKI) \
+  X(v_gwint,               int, 5200,  true, true, Topic::V_GWINT) \
+  X(v_powrot,              int, 10900,  true, true, Topic::V_POWROT) \
+  X(odjazd_od_kranc_kroki, int,   7000,      true, true, Topic::ODJAZD_KROKI) \
+  X(poz_start_gwintu,      int,   84000,     true, true, Topic::POZ_START_GWINTU) \
+  X(dlugosc_gwintu,        int,   55000,     true, true, Topic::DLUGOSC_GWINTU) \
+  X(zapas_wyjazdu,         int,   30000,      true, true, Topic::ZAPAS_WYJAZDU)
 
 // ==========================
 // Wymagane makra z platformio.ini
@@ -24,6 +24,9 @@
 #endif
 #ifndef WIFI_PASS
   #error "WIFI_PASS must be defined"
+#endif
+#ifndef WIFI_HOSTNAME
+  #define WIFI_HOSTNAME "ESP32-Aktualny_Projekt"
 #endif
 #ifndef MQTT_SERVER
   #error "MQTT_SERVER must be defined"
