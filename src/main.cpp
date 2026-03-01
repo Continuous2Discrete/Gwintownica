@@ -13,10 +13,12 @@ SterownikProcesu sterownikProcesu;
 
 void setup()
 {
+  agent.begin();
+  delay(200);
   Serial.begin(115200);
   delay(200);
   Serial.println("Start Gwintownica");
-  agent.begin();
+
 
   wej.init();
   os.init();
