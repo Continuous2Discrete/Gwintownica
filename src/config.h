@@ -91,7 +91,7 @@ static constexpr float V_POWROT    = 9000.0f;
 static constexpr uint32_t PCNT_MAX_ODCINEK_KROKI = 30000;
 
 // Timeouty (ms) - MUST FIX (zabezpieczenie przed jazda w nieskonczonosc)
-static constexpr uint32_t TIMEOUT_BAZOWANIE_MS = 30000; // bazowanie do krancowki start (dostroisz)
+static constexpr uint32_t TIMEOUT_BAZOWANIE_MS = 6000; // bazowanie do krancowki start (dostroisz)
 static constexpr uint32_t TIMEOUT_RUCH_MS      = 60000; // pojedynczy etap ruchu/odcinek (dostroisz)
 
 // ======================================================

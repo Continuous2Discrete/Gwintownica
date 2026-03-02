@@ -12,7 +12,7 @@
   X(v_gwint,               int, 5200,  true, true, Topic::V_GWINT) \
   X(v_powrot,              int, 10900,  true, true, Topic::V_POWROT) \
   X(odjazd_od_kranc_kroki, int,   7000,      true, true, Topic::ODJAZD_KROKI) \
-  X(poz_start_gwintu,      int,   84000,     true, true, Topic::POZ_START_GWINTU) \
+  X(poz_start_gwintu,      int,   71000,     true, true, Topic::POZ_START_GWINTU) \
   X(dlugosc_gwintu,        int,   55000,     true, true, Topic::DLUGOSC_GWINTU) \
   X(zapas_wyjazdu,         int,   30000,      true, true, Topic::ZAPAS_WYJAZDU)
 
