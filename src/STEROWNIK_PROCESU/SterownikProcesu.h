@@ -17,9 +17,11 @@ enum class StanProcesu : uint8_t {
   GWINTOWANIE,
   POWROT_PRZEZ_OTWOR,
   SZYBKI_DO_ZERO,
+  AWARYJNE_ODSUNIECIE,
   BLAD_KRANCOWKA_POCZATEK,
   BLAD_KRANCOWKA_KONIEC,
-  BLAD_TIMEOUT
+  BLAD_TIMEOUT,
+  BLAD_ALARM_AWARYJNY
 };
 
 class SterownikProcesu {
@@ -35,6 +37,7 @@ private:
   bool stanJestRuchem(StanProcesu s) const;
   bool stanDopuszczaKraPocz(StanProcesu s) const;
   void startBezpieczneBazowanie(uint32_t teraz_ms);
+  void uruchomAwaryjneZatrzymanie(uint32_t teraz_ms);
 
   Wejscia* wejscia = nullptr;
   OsRuchu* osruchu = nullptr;
@@ -42,4 +45,5 @@ private:
 
   StanProcesu stan_biezacy = StanProcesu::NIE_ZBAZOWANY_POSTOJ;
   uint32_t czas_wejscia_ms = 0;
+  bool alarm_awaryjny_latch = false;
 };

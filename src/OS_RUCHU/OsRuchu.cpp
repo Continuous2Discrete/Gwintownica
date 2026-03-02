@@ -197,8 +197,16 @@ void OsRuchu::startNastepnyKawal() {
   if (v_max < (float)MIN_FREQ_STEP) v_max = (float)MIN_FREQ_STEP;
   if (v_max > (float)MAX_FREQ_STEP) v_max = (float)MAX_FREQ_STEP;
 
-  rampa_aktywna = true;
   tryb_odcinka = true;
+
+  if (odcinek_bez_rampy) {
+    rampa_aktywna = false;
+    v_aktualna = v_max;
+    startPwmHz((uint32_t)v_max);
+    return;
+  }
+
+  rampa_aktywna = true;
 
   // Pierwszy segment: klasyczny start od MIN i narastanie.
   // Kolejne segmenty: kontynuacja profilu predkosci bez restartu rampy od zera.
@@ -273,6 +281,7 @@ void OsRuchu::update(uint32_t teraz_ms) {
   v_aktualna = 0.0f;
   v_max = 0.0f;
   tryb_odcinka = false;
+  odcinek_bez_rampy = false;
 
   uint32_t done = odcinek_zrobione;
   if (done == 0) done = kroki_abs;
@@ -355,8 +364,33 @@ void OsRuchu::startOdcinek(int32_t odcinek_kroki, float v_max_kroki_s) {
   odcinek_suma = kroki_abs;
   odcinek_pozostalo = kroki_abs;
   odcinek_zrobione = 0;
+  odcinek_bez_rampy = false;
 
   odcinek_vmax = v_max_kroki_s;
+  if (odcinek_vmax < (float)MIN_FREQ_STEP) odcinek_vmax = (float)MIN_FREQ_STEP;
+  if (odcinek_vmax > (float)MAX_FREQ_STEP) odcinek_vmax = (float)MAX_FREQ_STEP;
+
+  startNastepnyKawal();
+}
+
+void OsRuchu::startOdcinekBezRampy(int32_t odcinek_kroki, float v_kroki_s) {
+  if (odcinek_kroki == 0) {
+    stopNatychmiast();
+    wrzucZdarzenie(TypZdarzenia::ODCINEK_DONE, millis(), 0);
+    return;
+  }
+
+  bool do_przodu = (odcinek_kroki > 0);
+  ustawKierunek(do_przodu);
+
+  uint32_t kroki_abs = (uint32_t)abs(odcinek_kroki);
+
+  odcinek_suma = kroki_abs;
+  odcinek_pozostalo = kroki_abs;
+  odcinek_zrobione = 0;
+  odcinek_bez_rampy = true;
+
+  odcinek_vmax = v_kroki_s;
   if (odcinek_vmax < (float)MIN_FREQ_STEP) odcinek_vmax = (float)MIN_FREQ_STEP;
   if (odcinek_vmax > (float)MAX_FREQ_STEP) odcinek_vmax = (float)MAX_FREQ_STEP;
 
@@ -379,6 +413,7 @@ void OsRuchu::stopNatychmiast() {
   v_aktualna = 0.0f;
   v_max = 0.0f;
   tryb_odcinka = false;
+  odcinek_bez_rampy = false;
 
   odcinek_suma = 0;
   odcinek_pozostalo = 0;

@@ -22,6 +22,7 @@ bool SterownikProcesu::stanJestRuchem(StanProcesu s) const {
     case StanProcesu::GWINTOWANIE:
     case StanProcesu::POWROT_PRZEZ_OTWOR:
     case StanProcesu::SZYBKI_DO_ZERO:
+    case StanProcesu::AWARYJNE_ODSUNIECIE:
       return true;
     default:
       return false;
@@ -39,7 +40,31 @@ bool SterownikProcesu::stanDopuszczaKraPocz(StanProcesu s) const {
   }
 }
 
+void SterownikProcesu::uruchomAwaryjneZatrzymanie(uint32_t teraz_ms) {
+  bool byl_w_gwintowaniu = (stan_biezacy == StanProcesu::GWINTOWANIE);
+  bool kierunek_przed_stopem = osruchu->aktualnyKierunek();
+
+  osruchu->stopNatychmiast();
+
+  if (byl_w_gwintowaniu) {
+    int32_t odsuniecie =
+      kierunek_przed_stopem ? -AWARYJNE_ODSUNIECIE_KROKI : AWARYJNE_ODSUNIECIE_KROKI;
+
+    przejdzDo(StanProcesu::AWARYJNE_ODSUNIECIE, teraz_ms);
+    osruchu->startOdcinekBezRampy(odsuniecie, AWARYJNE_ODSUNIECIE_V);
+    return;
+  }
+
+  przejdzDo(StanProcesu::BLAD_ALARM_AWARYJNY, teraz_ms);
+}
+
 void SterownikProcesu::startBezpieczneBazowanie(uint32_t teraz_ms) {
+  if (wejscia->alarmAwaryjnyAktywny()) {
+    osruchu->stopNatychmiast();
+    przejdzDo(StanProcesu::BLAD_ALARM_AWARYJNY, teraz_ms);
+    return;
+  }
+
   osruchu->applyParametry(*p);
 
   if (wejscia->krPoczNaruszona()) {
@@ -55,6 +80,17 @@ void SterownikProcesu::startBezpieczneBazowanie(uint32_t teraz_ms) {
 
 void SterownikProcesu::update(uint32_t teraz_ms) {
   uint32_t dt = teraz_ms - czas_wejscia_ms;
+
+  if (wejscia->alarmAwaryjnyAktywny()) {
+    if (!alarm_awaryjny_latch) {
+      alarm_awaryjny_latch = true;
+      uruchomAwaryjneZatrzymanie(teraz_ms);
+    }
+
+    if (stan_biezacy != StanProcesu::AWARYJNE_ODSUNIECIE) {
+      return;
+    }
+  }
 
   // Twarde bezpieczenstwo: krancowka KONIEC zawsze zatrzymuje.
   if (wejscia->krKoniecNaruszona() && stan_biezacy != StanProcesu::BLAD_KRANCOWKA_KONIEC) {
@@ -93,6 +129,7 @@ void SterownikProcesu::update(uint32_t teraz_ms) {
     if (stan_biezacy == StanProcesu::BLAD_KRANCOWKA_POCZATEK) return;
     if (stan_biezacy == StanProcesu::BLAD_KRANCOWKA_KONIEC) return;
     if (stan_biezacy == StanProcesu::BLAD_TIMEOUT) return;
+    if (stan_biezacy == StanProcesu::BLAD_ALARM_AWARYJNY) return;
   }
 
   while (wejscia->pobierzZdarzenie(z)) {
@@ -100,6 +137,7 @@ void SterownikProcesu::update(uint32_t teraz_ms) {
     if (stan_biezacy == StanProcesu::BLAD_KRANCOWKA_POCZATEK) return;
     if (stan_biezacy == StanProcesu::BLAD_KRANCOWKA_KONIEC) return;
     if (stan_biezacy == StanProcesu::BLAD_TIMEOUT) return;
+    if (stan_biezacy == StanProcesu::BLAD_ALARM_AWARYJNY) return;
   }
 }
 
@@ -216,10 +254,25 @@ void SterownikProcesu::obsluzZdarzenie(const Zdarzenie& z, uint32_t teraz_ms) {
     }
     } break;
 
+    case StanProcesu::AWARYJNE_ODSUNIECIE: {
+      if (z.typ == TypZdarzenia::ODCINEK_DONE) {
+        osruchu->stopNatychmiast();
+        przejdzDo(StanProcesu::BLAD_ALARM_AWARYJNY, teraz_ms);
+      }
+    } break;
+
     case StanProcesu::BLAD_KRANCOWKA_POCZATEK:
     case StanProcesu::BLAD_KRANCOWKA_KONIEC:
-    case StanProcesu::BLAD_TIMEOUT: {
+    case StanProcesu::BLAD_TIMEOUT:
+    case StanProcesu::BLAD_ALARM_AWARYJNY: {
       if (z.typ == TypZdarzenia::KLIK) {
+        if (wejscia->alarmAwaryjnyAktywny()) {
+          osruchu->stopNatychmiast();
+          przejdzDo(StanProcesu::BLAD_ALARM_AWARYJNY, teraz_ms);
+          return;
+        }
+
+        alarm_awaryjny_latch = false;
         // Restart przez bezpieczna procedure (z ewentualnym uwolnieniem krańcówki POCZATEK).
         startBezpieczneBazowanie(teraz_ms);
       }
@@ -243,5 +296,7 @@ void SterownikProcesu::przejdzDo(StanProcesu nowy, uint32_t teraz_ms) {
     Serial.println("BLAD: KRANCOWKA_POCZATEK poza bazowaniem. STOP. Klik = uwolnienie+bazowanie.");
   } else if (nowy == StanProcesu::BLAD_TIMEOUT) {
     Serial.println("BLAD: TIMEOUT. STOP. Klik = bazowanie.");
+  } else if (nowy == StanProcesu::BLAD_ALARM_AWARYJNY) {
+    Serial.println("BLAD: ALARM_AWARYJNY. Zwolnij grzybek i kliknij aby bazowac.");
   }
 }

@@ -23,6 +23,8 @@ public:
 
   // ruch odcinkiem z rampą (start/stop 0)
   void startOdcinek(int32_t odcinek_kroki, float v_max_kroki_s);
+  // ruch odcinkiem bez rampy (stala predkosc)
+  void startOdcinekBezRampy(int32_t odcinek_kroki, float v_kroki_s);
 
   // ruch do pozycji absolutnej (w krokach), z rampą
   void startDoPozycji(int32_t poz_docelowa_kroki, float v_max_kroki_s);
@@ -99,6 +101,7 @@ private:
   uint32_t odcinek_pozostalo = 0;
   uint32_t odcinek_zrobione = 0;
   float odcinek_vmax = 0.0f;
+  bool odcinek_bez_rampy = false;
 
   pcnt_unit_handle_t pcnt_unit = nullptr;
   pcnt_channel_handle_t pcnt_chan = nullptr;

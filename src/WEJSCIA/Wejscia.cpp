@@ -14,6 +14,7 @@ void Wejscia::init()
   // ale trzymamy się minimalnej zmiany.
   pinMode(PIN_KR_POCZ, INPUT_PULLUP);
   pinMode(PIN_KR_KON,  INPUT_PULLUP);
+  pinMode(PIN_ALARM, INPUT);
 
   // stan poczatkowy przycisku (PULLUP): HIGH=puszczony
   btn_stan_stabilny = (digitalRead(PIN_BTN) == HIGH);
@@ -28,15 +29,47 @@ void Wejscia::init()
   krk_stan_stabilny = (digitalRead(PIN_KR_KON) == HIGH);
   krk_stan_ostatni  = krk_stan_stabilny;
   krk_czas_zmiany_ms = millis();
+
+  bool alarm_ok = (digitalRead(PIN_ALARM) == HIGH);
+  alarm_stan_aktywny = !alarm_ok;
+  alarm_ok_ostatni = alarm_ok;
+  alarm_czas_zmiany_ms = millis();
 }
 
 void Wejscia::update(uint32_t teraz_ms)
 {
+  // Alarm awaryjny ma najwyzszy priorytet.
+  obsluzAlarmAwaryjny(teraz_ms);
+
   // Krancowki (debounce, zbocze LOW->HIGH generuje zdarzenie)
   obsluzKrancowki(teraz_ms);
 
   // Przycisk (debounce + klik)
   obsluzPrzycisk(teraz_ms);
+}
+
+void Wejscia::obsluzAlarmAwaryjny(uint32_t teraz_ms)
+{
+  bool alarm_ok = (digitalRead(PIN_ALARM) == HIGH);
+
+  if (alarm_ok != alarm_ok_ostatni)
+  {
+    alarm_ok_ostatni = alarm_ok;
+    alarm_czas_zmiany_ms = teraz_ms;
+  }
+
+  if (!alarm_ok)
+  {
+    // Asymetryczny debounce: aktywacja alarmu natychmiast.
+    alarm_stan_aktywny = true;
+    return;
+  }
+
+  // Zwolnienie alarmu (powrot do HIGH) wymaga stabilnosci czasowej.
+  if ((teraz_ms - alarm_czas_zmiany_ms) >= DEBOUNCE_ALARM_RELEASE_MS)
+  {
+    alarm_stan_aktywny = false;
+  }
 }
 
 void Wejscia::obsluzPrzycisk(uint32_t teraz_ms)

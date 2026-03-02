@@ -11,12 +11,14 @@ public:
   bool pobierzZdarzenie(Zdarzenie& out);
   bool krPoczNaruszona() const { return krp_stan_stabilny; }
   bool krKoniecNaruszona() const { return krk_stan_stabilny; }
+  bool alarmAwaryjnyAktywny() const { return alarm_stan_aktywny; }
 
 private:
   void wrzucZdarzenie(TypZdarzenia t, uint32_t czas_ms, int32_t dane = 0);
 
   void obsluzPrzycisk(uint32_t teraz_ms);
   void obsluzKrancowki(uint32_t teraz_ms);
+  void obsluzAlarmAwaryjny(uint32_t teraz_ms);
 
   // Debounce przycisku
   bool btn_stan_stabilny = true;  // true=puszczony (bo PULLUP)
@@ -32,6 +34,13 @@ private:
   bool krk_stan_stabilny = false;
   bool krk_stan_ostatni  = false;
   uint32_t krk_czas_zmiany_ms = 0;
+
+  // Alarm awaryjny (GPIO5): HIGH=OK, LOW=ALARM
+  // Aktywacja alarmu jest natychmiastowa (bez opoznienia),
+  // zwolnienie (powrot do HIGH) jest debounced.
+  bool alarm_stan_aktywny = false;
+  bool alarm_ok_ostatni = true;
+  uint32_t alarm_czas_zmiany_ms = 0;
 
   // Kolejka zdarzen (prosta)
   static constexpr uint8_t QSIZE = 16;
