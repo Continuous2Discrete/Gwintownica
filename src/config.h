@@ -12,6 +12,7 @@ static constexpr uint8_t PIN_DIR      = 26;
 static constexpr uint8_t PIN_BTN      = 27;  // INPUT_PULLUP, przycisk zwiera do GND (aktywny LOW)
 static constexpr uint8_t PIN_KR_POCZ  = 32;  // krancowka poczatkowa aktywna HIGH
 static constexpr uint8_t PIN_KR_KON   = 33;  // krancowka koncowa aktywna HIGH
+static constexpr uint8_t PIN_ALARM    = 5;   // grzybek: HIGH=OK, LOW=ALARM
 
 // ======================================================
 // LEDC (ESP-IDF) - generacja STEP (PWM)
@@ -43,6 +44,12 @@ static constexpr uint32_t MAX_FREQ_STEP = 100000;  // 100 kHz ~ max rpm wg Twoje
 // ======================================================
 static constexpr uint32_t DEBOUNCE_BTN_MS = 40;
 static constexpr uint32_t DEBOUNCE_KR_MS = 20;
+// Wejscie alarmowe: aktywacja natychmiast, zwolnienie debounced.
+static constexpr uint32_t DEBOUNCE_ALARM_RELEASE_MS = 25;
+
+// Ruch awaryjny po zadzialaniu grzybka podczas GWINTOWANIE.
+static constexpr int32_t AWARYJNE_ODSUNIECIE_KROKI = 25000;
+static constexpr float AWARYJNE_ODSUNIECIE_V = 35000.0f;
 
 // ======================================================
 // RUCH - RAMPA
